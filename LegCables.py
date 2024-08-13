@@ -320,7 +320,11 @@ class uvwProcessor(om.ExplicitComponent) :
     
         junk=uvw_legtip[0]**2+uvw_legtip[1]**2
         cost=np.cos(theta)
-        delta_nvec = np.array( [cost * 2.*uvw_legtip[0]*uvw_legtip[1]/junk ,cost*(2.*uvw_legtip[1]**2/junk-1) -1, np.sin(theta)] ).T
+        
+        delta_nvec= np.array( [0. ,0., 0.] ).T #in case it is along y
+        if junk:
+            delta_nvec = np.array( [cost * 2.*uvw_legtip[0]*uvw_legtip[1]/junk ,cost*(2.*uvw_legtip[1]**2/junk-1) -1, np.sin(theta)] ).T
+
         
         #next is CC' and DD'
         CCp =  Lh*delta_tvec + C1orC2 * D_L/2.*delta_nvec
@@ -393,7 +397,7 @@ class LegCableBal(om.ImplicitComponent) :
         L_L = L_Lxyz0+uvw_legtip #final leg vector AB
         #>>>>>>>System of equations<<<<< unknowns (outputs) uvw_legtip theta_legtip
         #rigid leg condition:
-        residuals['uvw_legtip'][0]  = L_L0**2 - ((L_L0  + uvw_legtip[0])**2 + uvw_legtip[1]**2 + uvw_legtip[2]**2)  #length of leg is invariant   ::Eq#1
+        residuals['uvw_legtip'][0]  = L_L0**2 - (L_L**2).sum() #((L_L0  + uvw_legtip[0])**2 + uvw_legtip[1]**2 + uvw_legtip[2]**2)  #length of leg is invariant   ::Eq#1
         #constitutive equation for cables are now in the cable component
 
         #6 DOF static balance, moments about leg root (no torsional hinge)
@@ -425,17 +429,17 @@ class LegCableBal(om.ImplicitComponent) :
 
     def guess_nonlinear(self, inputs, outputs, residuals):
         #Now set the initial guesses
-        outputs['uvw_legtip']= 3*[0.1]
-        outputs['tht_legtip']= 0.01
+        outputs['uvw_legtip']= [-np.cos(2/180.),0.0,np.sin(2/180.)]
+        outputs['tht_legtip']= 0.0
         outputs['XYZ0']=  np.array([0,0,self.M_L*gravity/2.])
  
     
     def solve_nonlinear(self, inputs, outputs, residuals):
-        
-        solution = self.nonlinear_solver(residuals,iprint=3)
+        pass
+        #solution = self.nonlinear_solver(residuals,iprint=3)
 
     def compute(self,inputs, outputs, discrete_inputs=None,discrete_outputs=None):
-        #unpack
+        #output['tht_legtip']=
         pass
        # Fxyz_tip = inputs["Fxyz_tip"]
        # Mxyz_tip = inputs["Mxyz_tip"]
@@ -540,15 +544,7 @@ class CableGroup(om.Group):
         cycle.nonlinear_solver = om.NonlinearBlockGS()
 
         #Note: because promote=["*"] then no need for "wt_init." before "blade" or "airfoils" etc.)
-
- #       self.add_subsystem('re',RotorElasticity(modeling_options=modeling_options, opt_options=analysis_options), \
-  #                          #promotes_inputs = ["chord", "theta", "r", "precurve", "presweep"],\
-  #                          promotes_outputs = promoteGeom) # It calculates xsec properties
-        
-   #     self.add_subsystem('principal',PrincipalAxis(modeling_options=modeling_options, CS_Hansen=analysis_options['general']['CS_Hansen']), \
-    #                        promotes_inputs = ["EA","EIxx","EIyy","EIxy","x_ec","y_ec","x_tc","y_tc"],\
-     #                       promotes_outputs = ["EI11","EI22"]) # It calculates xsec properties
-        
+      
         #Connections (note because promote=["*"] then no need for "wt_init." before "blade" etc.)
         #Connections to compute reynolds (though not used)
         # self.connect("rotorse.ccblade.local_airfoil_velocities", "blade.compute_reynolds.local_airfoil_velocities")
@@ -579,7 +575,7 @@ class CableGroup(om.Group):
 
         self.nonlinear_solver = om.NewtonSolver(solve_subsystems=False)
         self.nonlinear_solver.options['iprint'] = 2
-        self.nonlinear_solver.options['maxiter'] = 20
+        self.nonlinear_solver.options['maxiter'] = 0# 20
         self.linear_solver = om.DirectSolver()
         
         
@@ -587,7 +583,7 @@ class CableGroup(om.Group):
 
     def compute(self,inputs, outputs):
       """compute cable OD and sig0 to satisfy constraints"""
-      outputs["tot_cable_mass"] = self.UC1.mass+self.LC1.mass
+      
       pass
         
 def main(**kwargs):
@@ -654,15 +650,15 @@ def main(**kwargs):
 
         #OBJECTIVE 
         #prob.model.add_objective("cable_totD.totD", ref =0.5)#,  ref=5000.) #this means reducing structural mass
-        #prob.model.add_objective("UC1LC1_mass.mass", ref =10000.)#,  ref=5000.) #this means reducing structural mass
-        prob.model.add_objective("tot_cable_mass", ref =10000.)#,  ref=5000.) #this means reducing structural mass
+        prob.model.add_objective("UC1LC1_mass.mass", ref =10000.)#,  ref=5000.) #this means reducing structural mass
+        
         #CONSTRAINTS  
         prob.model.add_constraint('UC1.sig',  upper=parameters['PSF_mat']*parameters['UCmat'].fy) #This is yield constraint
         prob.model.add_constraint('UC2.sig',  upper=parameters['PSF_mat']*parameters['UCmat'].fy) #This is yield constraint
         prob.model.add_constraint('LC1.sig',  upper=parameters['PSF_mat']*parameters['LCmat'].fy) #This is yield constraint
         prob.model.add_constraint('LC2.sig',  upper=parameters['PSF_mat']*parameters['LCmat'].fy) #This is yield constraint
 
-        prob.model.add_constraint('LegCableBal.uvw_legtip', indices=range(1,3),  upper=+1.5) #This is pitch constraint
+        prob.model.add_constraint('uvw_legtip', indices=range(1,3),  upper=+1.5) #This is pitch constraint
         
         #RECORDER
         recorder = om.SqliteRecorder('cases.sql') #creates a recorder variable
@@ -687,9 +683,9 @@ def main(**kwargs):
     print('UC.D= {:5.3f} m;  LC.D= {:5.3f} m; UC.sig0= {:5.3f} MPa; LC.sig0 {:5.3f} MPa \n'.\
                 format(*prob.get_val('UC1.D'),  *prob.get_val('LC1.D'), 
                        *prob.get_val('UC1.sig0')/1.e6, *prob.get_val('LC1.sig0')/1.e6))
-    print('UC1.N= {:5.3f} kN; LC1.N {:5.3f} kN;\
-          UC1.sig= {:5.3f} MPa; LC1.sig {:5.3f} MPa \n'.\
-                format(*prob.get_val('UC1.N')/1.e3,  *prob.get_val('LC1.D')/1.e3, 
+    print(('UC1.Nxyz= '+3*'{:5.3f} ' +'kN; LC1.Nxyz= '+3*'{:5.3f} ' +'kN;\
+          UC1.sig= {:5.3f} MPa; LC1.sig {:5.3f} MPa \n').\
+                format(*prob.get_val('UC1.Nxyz')/1.e3,*prob.get_val('LC1.Nxyz')/1.e3,  *prob.get_val('LC1.D')/1.e3, 
                        *prob.get_val('UC1.sig')/1.e6, *prob.get_val('LC1.sig')/1.e6))
     
     print('Total cable mass= {:.3f} kg \n'.format(*prob.get_val('UC1LC1_mass.mass')))
@@ -716,8 +712,8 @@ def main(**kwargs):
         constraints = case.get_constraints()
     
         #PRINT RESULTS
-        prob.UC1.plot(title='Post-Optimization')
-        prob.LC1.plot(title='Post-Optimization')
+        #prob.model.UC1.plot(title='Post-Optimization')
+        #prob.model.LC1.plot(title='Post-Optimization')
         #print('design vars\t',design_vars['Ddh'],design_vars['Dpod']) 
         #print('constraints\t',constraints['floater.PRP_Roffsets'])
        # print('constraints\t',constraints['floaterAtRest.PRP_Roffsets'])
@@ -763,7 +759,7 @@ if __name__ == '__main__':
     UC1_xyz0_def[0,2] = zifc
     
     D_c_def = [0.15,0.1] #lower,upper cable ODs [m]
-    sig0_c_def = np.array([500.E6, 700.e6]) #lower, upper cable sigma0  constraints[Pa]
+    sig0_c_def = np.array([100.E6, 100.e6]) #lower, upper cable sigma0  constraints[Pa]
     sig0_bounds_def = np.array([50.E6, 700.e6]) # sigma0  constraints[Pa]
     
     D_bounds_def = np.array([[0.05,0.25],[0.05,0.25]]) #lower and upper cable cOD min,max
@@ -772,7 +768,7 @@ if __name__ == '__main__':
 
     PSF_mat_def=1.2  #material yield PSF for cable
 
-    opti = False
+    opti = True
     #INPUTS END
 
     #Read inputs
