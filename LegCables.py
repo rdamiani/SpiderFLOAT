@@ -318,12 +318,10 @@ class uvwProcessor(om.ExplicitComponent) :
         
         delta_tvec = uvw_legtip/L_L0
     
-        junk=uvw_legtip[0]**2+uvw_legtip[1]**2
+        junk=uvw_legtip[1]/L_L0
         cost=np.cos(theta)
         
-        delta_nvec= np.array( [0. ,0., 0.] ).T #in case it is along y
-        if junk:
-            delta_nvec = np.array( [cost * 2.*uvw_legtip[0]*uvw_legtip[1]/junk ,cost*(2.*uvw_legtip[1]**2/junk-1) -1, np.sin(theta)] ).T
+        delta_nvec = np.array( [-cost * junk  ,cost*(1-junk**2) -1, np.sin(theta)] ).T
 
         
         #next is CC' and DD'
@@ -429,9 +427,9 @@ class LegCableBal(om.ImplicitComponent) :
 
     def guess_nonlinear(self, inputs, outputs, residuals):
         #Now set the initial guesses
-        outputs['uvw_legtip']= [-np.cos(2/180.),0.0,np.sin(2/180.)]
+        outputs['uvw_legtip']= [-4.1384e-003, 0.,0.53814] #[-np.cos(2/180.*np.pi),0.0,np.sin(2/180.*np.pi)] 
         outputs['tht_legtip']= 0.0
-        outputs['XYZ0']=  np.array([0,0,self.M_L*gravity/2.])
+        outputs['XYZ0']=  np.array([1.8881e+007,0,-42087.]) #self.M_L*gravity/2.])
  
     
     def solve_nonlinear(self, inputs, outputs, residuals):
@@ -517,11 +515,15 @@ class CableGroup(om.Group):
         self.add_subsystem("D_Cs", IndepVarComp("D_C",val=np.zeros(2),units='m')) #lower and upper cable diameters
         self.add_subsystem("sig0_Cs", IndepVarComp("sig0_C",val=np.zeros(2),units="Pa")) #lower and upper cable prestresses
         
-        self.add_subsystem("cable_totD", ExecComp("totD=D_UC + D_LC",D_UC={'val':0.2,'units':"m"},D_LC={'val':0.2,'units':"m"}) )#lower and upper cable ODs
-        self.add_subsystem("UC1LC1_mass", ExecComp("mass=m_UC + m_LC", m_UC={'val':1000.,'units':"kg"},m_LC={'val':1000.,'units':"kg"}) )#lower and upper cable ODs
-
-        #Create a subgroup to solve the coupled system
+        #_____Cycle: Create a subgroup to solve the coupled system
         cycle = self.add_subsystem("cycle",om.Group(),promotes=['*'])
+
+        Lh=parameters["L_L0"]-parameters["zoff"][0] #distance to hinge along leg axis from root
+        cycle.add_subsystem("uvwLC1", uvwProcessor(C1orC2=-1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
+        cycle.add_subsystem("uvwLC2", uvwProcessor(C1orC2=+1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
+        Lh=parameters["L_L0"]-parameters["zoff"][1] #distance to hinge along leg axis from root
+        cycle.add_subsystem("uvwUC1", uvwProcessor(C1orC2=-1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
+        cycle.add_subsystem("uvwUC2", uvwProcessor(C1orC2=+1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
 
         cycle.add_subsystem("UC1", legCable(xyz0=parameters['UC1_xyz0'],material=parameters["UCmat"]), promotes_outputs=[])
         cycle.add_subsystem("LC1", legCable(xyz0=parameters['LC1_xyz0'],material=parameters["LCmat"]))
@@ -533,21 +535,14 @@ class CableGroup(om.Group):
         junk[:,1] *=-1
         cycle.add_subsystem("LC2", legCable(xyz0=junk,material=parameters["LCmat"]))
         
-        Lh=parameters["L_L0"]-parameters["zoff"][0] #distance to hinge along leg axis from root
-        cycle.add_subsystem("uvwLC1", uvwProcessor(C1orC2=-1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
-        cycle.add_subsystem("uvwLC2", uvwProcessor(C1orC2=+1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
-        Lh=parameters["L_L0"]-parameters["zoff"][1] #distance to hinge along leg axis from root
-        cycle.add_subsystem("uvwUC1", uvwProcessor(C1orC2=-1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
-        cycle.add_subsystem("uvwUC2", uvwProcessor(C1orC2=+1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
-        
         cycle.add_subsystem('LegCableBal',LegCableBal(parameters=parameters),promotes_outputs=["uvw_legtip","tht_legtip"]) 
         cycle.nonlinear_solver = om.NonlinearBlockGS()
-
+        #_____________end cycle
+        
+        self.add_subsystem("UC1LC1_mass", ExecComp("mass=m_UC + m_LC", m_UC={'val':1000.,'units':"kg"},m_LC={'val':1000.,'units':"kg"}) )#lower and upper cable ODs
+        self.add_subsystem("cable_totD", ExecComp("totD=D_UC + D_LC",D_UC={'val':0.2,'units':"m"},D_LC={'val':0.2,'units':"m"}) )#lower and upper cable ODs        
+        
         #Note: because promote=["*"] then no need for "wt_init." before "blade" or "airfoils" etc.)
-      
-        #Connections (note because promote=["*"] then no need for "wt_init." before "blade" etc.)
-        #Connections to compute reynolds (though not used)
-        # self.connect("rotorse.ccblade.local_airfoil_velocities", "blade.compute_reynolds.local_airfoil_velocities")
 
         #connections to cable components
         self.connect("D_Cs.D_C",["UC1.D","UC2.D","cable_totD.D_UC"], src_indices=1)
@@ -569,9 +564,9 @@ class CableGroup(om.Group):
         self.connect("LC1.Nxyz", "LegCableBal.Nxyz_LC1")
         self.connect("LC2.Nxyz", "LegCableBal.Nxyz_LC2")
         self.connect("UC1.Bp",   "LegCableBal.UC1_Bp")
-        self.connect("UC2.Bp", "LegCableBal.UC2_Bp")
-        self.connect("LC1.Bp", "LegCableBal.LC1_Bp")
-        self.connect("LC2.Bp", "LegCableBal.LC2_Bp")
+        self.connect("UC2.Bp",   "LegCableBal.UC2_Bp")
+        self.connect("LC1.Bp",   "LegCableBal.LC1_Bp")
+        self.connect("LC2.Bp",   "LegCableBal.LC2_Bp")
 
         self.nonlinear_solver = om.NewtonSolver(solve_subsystems=False)
         self.nonlinear_solver.options['iprint'] = 2
@@ -723,9 +718,9 @@ def main(**kwargs):
         #Spit out a new yaml with the design?
         #Spit out the Floater Mass Matrix and Hydrostatic (pure hydro) stiffness matrix
         print('______________________________________________________\n')
-        print('Optimized cable mass ={:5.3f} kg'.format(*objectives['LegCable.mass']))
-        print('D_c=',design_vars['D_c'])
-        print('sig0_c=',design_vars['sig0_c'])
+        print('Optimized cable mass ={:5.3f} kg'.format(*objectives['UC1LC1_mass.mass']))
+        print('D_c=',design_vars['D_Cs.D_C'])
+        print('sig0_c=',design_vars['sig0_Cs.sig0_C'])
 
         pass
 
@@ -736,11 +731,11 @@ if __name__ == '__main__':
     #INPUTS  START
     baseline_yaml_def = Path("D:\RRD_ENGINEERING\PROJECTS\WE202402_ATLANTIS2\ANALYSIS\Optimization\LegCable.yaml")
 
-    Fxyz_tip_def = np.array([0.0, 0*200.e3, 000.e3,0.,0.,0.])
+    Fxyz_tip_def = np.array([0.0, 6.e6, 000.e3,0.,0.,0.])
     D_L_def=3. # [m] leg OD
     L_L0_def=35. # [m] leg length
     L_Lxyz0_def = np.array([L_L0_def,0.,0.]) #components of leg vector root to tip in global CS
-    M_L_def=15000. # [kg] leg mass
+    M_L_def=0*15000. # [kg] leg mass
     zoff_def = [3.5,5.5] # [m] distance of lower and upper hinge from leg tip
     abc_def=[7.,29,0.] 
 
@@ -758,7 +753,7 @@ if __name__ == '__main__':
     UC1_xyz0_def = np.copy(LC1_xyz0_def)
     UC1_xyz0_def[0,2] = zifc
     
-    D_c_def = [0.15,0.1] #lower,upper cable ODs [m]
+    D_c_def = [0.15,0.15] #lower,upper cable ODs [m]
     sig0_c_def = np.array([100.E6, 100.e6]) #lower, upper cable sigma0  constraints[Pa]
     sig0_bounds_def = np.array([50.E6, 700.e6]) # sigma0  constraints[Pa]
     
