@@ -253,6 +253,9 @@ class legCable(om.ExplicitComponent) :
     def initialize(self):
         self.options.declare("material")
         self.options.declare("xyz0",  default=np.zeros([2,3]), desc="Cable [end A; end B] coordinates at setup [m]" ) 
+        #Next 2 are for guesses
+        self.options.declare("sig00",  default=50.e6, desc="Cable prestress initial guess [Pa]" ) 
+        self.options.declare("D_C00",      default=0.1, desc="Cable D initial guess [Pa]" ) 
         self.count4plot =0 
 
     def setup(self):
@@ -263,7 +266,11 @@ class legCable(om.ExplicitComponent) :
         self.add_input("uvwB",      val=np.zeros(3), desc="Cable end B, final displacement" , units="m"     )
         self.add_input("D",         val=0., desc="Cable diameter", units="m")
         
-        self.add_output("Nxyz",     val=np.zeros(3)+1,   desc="Final load components along x,y,z at end B, after pretension and extra deformation", units="N")
+        #Calculate initial guesses for Nxyz
+        mycable = Cable(self.options['D_C00'], self.xyz0, self.options["sig00"], np.zeros(3), material=self.material)
+        Nxyz_guess = mycable.strain_tension[1]
+        
+        self.add_output("Nxyz",     val=Nxyz_guess,   desc="Final load components along x,y,z at end B, after pretension and extra deformation", units="N")
         self.add_output("Bp",       val=self.xyz0[1,:], desc="Final x,y,z of end B, after pretension and extra deformation", units="m")
         self.add_output("sig",      val=0., desc="Actual maximum axial stress"  , units="Pa"     )
         self.add_output("mass",     val=0., desc="Dry mass"  , units="kg"     )
@@ -274,7 +281,7 @@ class legCable(om.ExplicitComponent) :
         #if self.count4plot==0:
         #    fig= plt.figure()
 
-        self.count4plot +=1
+       # self.count4plot +=1
 
         outputs["Nxyz"]  = mycable.strain_tension[1]
         outputs['mass']  = mycable.mass
@@ -336,7 +343,7 @@ class LegCableBal(om.ImplicitComponent) :
         self.options.declare("parameters")
     
     def setup(self):
-        parameters = self.paramters = self.options['parameters']
+        parameters = self.parameters = self.options['parameters']
         
         self.Fxyz_tip = parameters['Fxyz_tip'][0:3] #"3 forces at leg tip"      , units="N"     )
         self.Mxyz_tip = parameters['Fxyz_tip'][3:6] #"3 moments at leg tip"      , units="N*m"     )
@@ -348,9 +355,6 @@ class LegCableBal(om.ImplicitComponent) :
         self.M_L  = parameters['M_L']   #Leg Mass
         self.L_lh = self.L_L0 - parameters["zoff"][0] #distance from root of leg to lower cable hinges
         self.L_uh = self.L_L0 - parameters["zoff"][1] #distance from root of leg to upper cable hinges
-    #need to give an estimate of these states because the nonlinear solver does not use the outputs from LegCable and processor unfortunately
-       # mycable = Cable(inputs['D'], parameters["LC1_xyz0"], inputs["sig0"], np.zeros(3), material=self.material)
-       # outputs["Nxyz"]  = mycable.strain_tension[1]
 
         self.add_input( "Nxyz_UC1",   val=np.zeros(3), desc="Upper C1 cable components of tension at end B",       units="N"   )
         self.add_input( "Nxyz_UC2",   val=np.zeros(3), desc="Upper C2 cable components of tension at end B",       units="N"   )
@@ -407,16 +411,16 @@ class LegCableBal(om.ImplicitComponent) :
         residuals['XYZ0'][2] = Fxyz[2] + XYZ0[2] + Nxyz_UC1[2] + Nxyz_UC2[2] + Nxyz_LC1[2] + Nxyz_LC2[2] - M_L*gravity #Balance along Z  ::Eq#4  
         # 
         residuals['tht_legtip'] = Mxyz[0] - L_L[2]*Fxyz[1] + (Fxyz[2] - M_L * gravity/2.) * L_L[1]          + \
-                                                      UC1_Bp[1]*Nxyz_UC1[2] - UC1_Bp[2]*Nxyz_UC1[1] + \
-                                                      UC2_Bp[1]*Nxyz_UC2[2] - UC2_Bp[2]*Nxyz_UC2[1] + \
-                                                      LC1_Bp[1]*Nxyz_LC1[2] - LC1_Bp[2]*Nxyz_LC1[1] + \
-                                                      LC2_Bp[1]*Nxyz_LC2[2] - LC2_Bp[2]*Nxyz_LC2[1]   #Eq.#5
+                                                      UC1_Bp[1]*Nxyz_UC1[2] - UC1_Bp[2]*Nxyz_UC1[1]  \
+                                                    + UC2_Bp[1]*Nxyz_UC2[2] - UC2_Bp[2]*Nxyz_UC2[1]  \
+                                                    + LC1_Bp[1]*Nxyz_LC1[2] - LC1_Bp[2]*Nxyz_LC1[1]  \
+                                                    + LC2_Bp[1]*Nxyz_LC2[2] - LC2_Bp[2]*Nxyz_LC2[1]   #Eq.#5
 # 
         residuals['uvw_legtip'][1] = Mxyz[1] + L_L[1]*Fxyz[0] + (-Fxyz[2] + M_L * gravity/2.) * L_L[0]          + \
-                                                      - UC1_Bp[0]*Nxyz_UC1[2] + UC1_Bp[2]*Nxyz_UC1[0]  \
-                                                      - UC2_Bp[0]*Nxyz_UC2[2] + UC2_Bp[2]*Nxyz_UC2[0]  \
-                                                      - LC1_Bp[0]*Nxyz_LC1[2] + LC1_Bp[2]*Nxyz_LC1[0]  \
-                                                      - LC2_Bp[0]*Nxyz_LC2[2] + LC2_Bp[2]*Nxyz_LC2[0]  #Eq.#6
+                                                      + UC1_Bp[0]*Nxyz_UC1[2] - UC1_Bp[2]*Nxyz_UC1[0]  \
+                                                      + UC2_Bp[0]*Nxyz_UC2[2] - UC2_Bp[2]*Nxyz_UC2[0]  \
+                                                      + LC1_Bp[0]*Nxyz_LC1[2] - LC1_Bp[2]*Nxyz_LC1[0]  \
+                                                      + LC2_Bp[0]*Nxyz_LC2[2] - LC2_Bp[2]*Nxyz_LC2[0]  #Eq.#6
 # 
         residuals['uvw_legtip'][2] = Mxyz[2] + L_L[0]*Fxyz[1] - L_L[1]*Fxyz[0]                                  + \
                                                       - UC1_Bp[1]*Nxyz_UC1[0] + UC1_Bp[0]*Nxyz_UC1[1]  \
@@ -434,7 +438,8 @@ class LegCableBal(om.ImplicitComponent) :
         outputs['tht_legtip']= 0.0
         outputs['XYZ0']=  np.array([1.6249e+007,0,-2.4994e+006]) #self.M_L*gravity/2.])
 
-    
+
+
     def solve_nonlinear(self, inputs, outputs, residuals):
         pass
         #solution = self.nonlinear_solver(residuals,iprint=3)
@@ -528,15 +533,15 @@ class CableGroup(om.Group):
         cycle.add_subsystem("uvwUC1", uvwProcessor(C1orC2=-1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"] )
         cycle.add_subsystem("uvwUC2", uvwProcessor(C1orC2=+1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
 
-        cycle.add_subsystem("UC1", legCable(xyz0=parameters['UC1_xyz0'],material=parameters["UCmat"]))
-        cycle.add_subsystem("LC1", legCable(xyz0=parameters['LC1_xyz0'],material=parameters["LCmat"]))
+        cycle.add_subsystem("UC1", legCable(xyz0=parameters['UC1_xyz0'],material=parameters["UCmat"],sig00=parameters["sig00"][1],D_C00=parameters["D_C00"][1]))
+        cycle.add_subsystem("LC1", legCable(xyz0=parameters['LC1_xyz0'],material=parameters["LCmat"],sig00=parameters["sig00"][0],D_C00=parameters["D_C00"][0]))
         #Symmetric cables provide symmetric geometry in mirrored y
         junk = np.copy(parameters["UC1_xyz0"])
         junk[:,1] *=-1
-        cycle.add_subsystem("UC2", legCable(xyz0=junk,material=parameters["UCmat"]))
+        cycle.add_subsystem("UC2", legCable(xyz0=junk,material=parameters["UCmat"],sig00=parameters["sig00"][1],D_C00=parameters["D_C00"][1]))
         junk = np.copy(parameters["LC1_xyz0"])
         junk[:,1] *=-1
-        cycle.add_subsystem("LC2", legCable(xyz0=junk,material=parameters["LCmat"]))
+        cycle.add_subsystem("LC2", legCable(xyz0=junk,material=parameters["LCmat"],sig00=parameters["sig00"][0],D_C00=parameters["D_C00"][0]))
         
         cycle.add_subsystem('LegCableBal',LegCableBal(parameters=parameters),promotes_outputs=["uvw_legtip","tht_legtip"]) 
         cycle.connect("uvwUC1.uvwB","UC1.uvwB")
@@ -602,6 +607,9 @@ def main(**kwargs):
     opti                   = kwargs['opti']
     
     parameters= {}
+    parameters['D_C00']      = D_c #for guess
+    parameters['sig00']    = sig0_c #for guess
+
     parameters['D_L']      = kwargs['D_L']
     parameters['L_L0']     = kwargs['L_L0']
     parameters['L_Lxyz0']  = kwargs['L_Lxyz0']
@@ -614,6 +622,7 @@ def main(**kwargs):
     parameters['Fxyz_tip'] = kwargs['Fxyz_tip']
     parameters['LC1_xyz0'] = kwargs['LC1_xyz0'] 
     parameters['UC1_xyz0'] = kwargs['UC1_xyz0'] 
+
     #___________________________________#
     
     prob= om.Problem( model=CableGroup(parameters=parameters)) 
