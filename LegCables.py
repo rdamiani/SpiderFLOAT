@@ -5,7 +5,7 @@
 LegCables.py
 
 Created by Rick Damiani on 2024-08-05.
-Copyright (c)  RRD Engineering, LLC. All rights reserved.
+Copyright (c)  FWTC, LLC. All rights reserved.
 """
 
 #from __future__ import print_function
@@ -246,8 +246,7 @@ class Cable:
         #                       xytext=(0, 10*(ii+1)*(-1)**i_surf), textcoords='offset points', arrowprops=dict(arrowstyle="->", connectionstyle="arc3"),  horizontalalignment='center', verticalalignment='bottom')
             
         #plt.show()            
-        
-
+ 
 class legCable(om.ExplicitComponent) :   
     """Compute the main properties of a cable.\n
        """
@@ -264,8 +263,8 @@ class legCable(om.ExplicitComponent) :
         self.add_input("uvwB",      val=np.zeros(3), desc="Cable end B, final displacement" , units="m"     )
         self.add_input("D",         val=0., desc="Cable diameter", units="m")
         
-        self.add_output("Nxyz",     val=np.zeros(3)+1, desc="Final load components along x,y,z at end B, after pretension and extra deformation", units="N")
-        self.add_output("Bp",       val=np.zeros(3)+0.1, desc="Final x,y,z of end B, after pretension and extra deformation", units="m")
+        self.add_output("Nxyz",     val=np.zeros(3)+1,   desc="Final load components along x,y,z at end B, after pretension and extra deformation", units="N")
+        self.add_output("Bp",       val=self.xyz0[1,:], desc="Final x,y,z of end B, after pretension and extra deformation", units="m")
         self.add_output("sig",      val=0., desc="Actual maximum axial stress"  , units="Pa"     )
         self.add_output("mass",     val=0., desc="Dry mass"  , units="kg"     )
         
@@ -337,12 +336,13 @@ class LegCableBal(om.ImplicitComponent) :
         self.options.declare("parameters")
     
     def setup(self):
-        parameters = self.options['parameters']
+        parameters = self.paramters = self.options['parameters']
         
         self.Fxyz_tip = parameters['Fxyz_tip'][0:3] #"3 forces at leg tip"      , units="N"     )
         self.Mxyz_tip = parameters['Fxyz_tip'][3:6] #"3 moments at leg tip"      , units="N*m"     )
         
         self.abc  = parameters['abc'] #,     val=np.zeros(3), desc='Geometry a,b,c paramaters, a=keel to leg-root hinge, c=leg-tip to leg-root vertical distance, b= top cable hinge to leg root vertical distance', units='m')
+        self.D_L  = parameters['D_L']  #Leg OD
         self.L_L0 = parameters['L_L0']  #Leg length
         self.L_Lxyz0 = parameters['L_Lxyz0']  #Leg AB components in the glbal CS
         self.M_L  = parameters['M_L']   #Leg Mass
@@ -351,16 +351,16 @@ class LegCableBal(om.ImplicitComponent) :
     #need to give an estimate of these states because the nonlinear solver does not use the outputs from LegCable and processor unfortunately
        # mycable = Cable(inputs['D'], parameters["LC1_xyz0"], inputs["sig0"], np.zeros(3), material=self.material)
        # outputs["Nxyz"]  = mycable.strain_tension[1]
-       
-        self.add_input( "Nxyz_UC1",   val=np.zeros(3)+1., desc="Upper C1 cable components of tension at end B",       units="N"   )
-        self.add_input( "Nxyz_UC2",   val=np.zeros(3)+1., desc="Upper C2 cable components of tension at end B",       units="N"   )
-        self.add_input( "Nxyz_LC1",   val=np.zeros(3)+1., desc="Lower C1 cable components of tension at end B",       units="N"   )
-        self.add_input( "Nxyz_LC2",   val=np.zeros(3)+1., desc="Lower C2 cable components of tension at end B",       units="N"   )
 
-        self.add_input( "UC1_Bp",     val=self.L_uh, desc="Upper C1 cable final coordinates of end B",       units="m"   )
-        self.add_input( "UC2_Bp",     val=self.L_uh, desc="Upper C2 cable final coordinates of end B",       units="m"   )
-        self.add_input( "LC1_Bp",     val=self.L_lh, desc="Lower C1 cable final coordinates of end B",       units="m"   )
-        self.add_input( "LC2_Bp",     val=self.L_lh, desc="Lower C2 cable final coordinates of end B",       units="m"   )
+        self.add_input( "Nxyz_UC1",   val=np.zeros(3), desc="Upper C1 cable components of tension at end B",       units="N"   )
+        self.add_input( "Nxyz_UC2",   val=np.zeros(3), desc="Upper C2 cable components of tension at end B",       units="N"   )
+        self.add_input( "Nxyz_LC1",   val=np.zeros(3), desc="Lower C1 cable components of tension at end B",       units="N"   )
+        self.add_input( "Nxyz_LC2",   val=np.zeros(3), desc="Lower C2 cable components of tension at end B",       units="N"   )
+
+        self.add_input( "UC1_Bp",     val=np.array([self.L_uh,-self.D_L/2.,self.L_Lxyz0[2]]), desc="Upper C1 cable final coordinates of end B",       units="m"   )
+        self.add_input( "UC2_Bp",     val=np.array([self.L_uh,self.D_L/2., self.L_Lxyz0[2]]), desc="Upper C2 cable final coordinates of end B",       units="m"   )
+        self.add_input( "LC1_Bp",     val=np.array([self.L_lh,-self.D_L/2.,self.L_Lxyz0[2]]), desc="Lower C1 cable final coordinates of end B",       units="m"   )
+        self.add_input( "LC2_Bp",     val=np.array([self.L_lh,self.D_L/2., self.L_Lxyz0[2]]), desc="Lower C2 cable final coordinates of end B",       units="m"   )
 
         self.add_output( "uvw_legtip", val=np.zeros(3), desc="u,v, w at leg tip", units="m"   )
         self.add_output( "tht_legtip", val=0., desc="twist at leg tip", units="rad"   )
@@ -433,7 +433,7 @@ class LegCableBal(om.ImplicitComponent) :
         outputs['uvw_legtip']= [-1.8542e-003, 0.,0.36018] #[-np.cos(2/180.*np.pi),0.0,np.sin(2/180.*np.pi)] 
         outputs['tht_legtip']= 0.0
         outputs['XYZ0']=  np.array([1.6249e+007,0,-2.4994e+006]) #self.M_L*gravity/2.])
-        inputs['UC1_Bp']= 
+
     
     def solve_nonlinear(self, inputs, outputs, residuals):
         pass
@@ -752,8 +752,8 @@ if __name__ == '__main__':
     cosa = np.cos(np.deg2rad(60.))
     sina = np.sin(np.deg2rad(60.))
     L_lh = L_L0_def - zoff_def[0] #length along leg-axis from stem to lower cable hinge
-    LC1_xyz0_def = np.array([[Rstem*cosa, -Rstem*sina, zkeel  ],
-                             [L_lh+Rstem, -Rleg, zleg        ]])
+    LC1_xyz0_def = np.array([[Rstem*(cosa-1.), -Rstem*sina, zkeel  ],
+                             [L_lh, -Rleg, zleg        ]])
     UC1_xyz0_def = np.copy(LC1_xyz0_def)
     UC1_xyz0_def[0,2] = zifc
     
@@ -784,7 +784,7 @@ if __name__ == '__main__':
     parser.add_argument('--Fxyz_tip',  metavar='Fxyz_tip', type=float,    help= 'Forces and moments at Leg Tip',      default=Fxyz_tip_def)
     parser.add_argument('--D_L',       metavar='D_L',      type=float,    help= 'Leg OD [m]',      default=D_L_def)
     parser.add_argument('--L_L0',      metavar='L_L0',     type=float,    help= 'Leg length [m]',      default=L_L0_def)
-    parser.add_argument('--L_Lxyz0',   metavar='L_Lxyz0',     type=float,    help= 'Leg vector components float(3) [m]',      default=L_Lxyz0_def)
+    parser.add_argument('--L_Lxyz0',   metavar='L_Lxyz0',  type=float,    help= 'Leg vector components float(3) [m]',      default=L_Lxyz0_def)
     parser.add_argument('--M_L',       metavar='M_L',      type=float,    help= 'Leg mass [kg]',       default=M_L_def)
     parser.add_argument('--zoff',      metavar='zoff',     type=float,    help= 'Lower and upper cable hinge on leg offset from tip [2] [m]',      default=zoff_def)
     parser.add_argument('--LC1_xyz0',  metavar='LC1_xyz0', type=float,    help= 'Lower C1 cable end A and end B coordinates [2,3] [m]',      default=LC1_xyz0_def)
