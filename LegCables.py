@@ -196,7 +196,11 @@ class Cable:
         Lf = np.linalg.norm(ABp) #final cable length np.sqrt((ABp**2).sum()) 
         #print("post Lf calc")
         Delta_eps = (Lf-self.Lg0)/self.L0 #this is the additional eps from eps0, because of the final u,v,w displacements of end B
+        
         Nxyz = ABp/Lf * (self.N0 + self.material.E * self.A_xsect * Delta_eps) #components of final loads along, X,Y,Z
+        if self.eps0+Delta_eps <0.: #no compression for cables 
+            Nxyz=np.zeros(3)    
+
         N = np.linalg.norm(Nxyz)
         return Delta_eps, Nxyz, N, Lf
 
@@ -588,10 +592,10 @@ class CableGroup(om.Group):
         cycle.nonlinear_solver = om.NewtonSolver(solve_subsystems=False)
         cycle.nonlinear_solver.options['iprint'] = 3
         cycle.nonlinear_solver.options['maxiter'] = 20# 20
-        self.linear_solver = om.DirectSolver()
+        cycle.linear_solver = om.DirectSolver()
         
         
-        plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]),)
+        #plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]),)
 
     def compute(self,inputs, outputs):
       """compute cable OD and sig0 to satisfy constraints"""
