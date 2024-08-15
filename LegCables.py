@@ -14,16 +14,17 @@ import datetime
 from tkinter import N
 import numpy as np
 import argparse
-import copy
+#import copy
 from pathlib import Path
 import os, time, shutil, copy
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+#import matplotlib.animation as animation
 import openmdao.api as om
-import pandas as pd
+#import pandas as pd
+import yaml
 #import openpyxl
 
-from openmdao.api import IndepVarComp, ExplicitComponent, Group, Problem, ExecComp
+from openmdao.api import IndepVarComp, ExplicitComponent, ExecComp
 #from scipy import linalg
 from wisdem.commonse import gravity
 from wisdem.commonse.cross_sections import Tube
@@ -276,7 +277,8 @@ class legCable(om.ExplicitComponent) :
         Nxyz_guess =-mycable.strain_tension[1]
         
         self.add_output("Nxyz",     val=Nxyz_guess,   desc="Final load components along x,y,z at end B, after pretension and extra deformation", units="N")
-        self.add_output("Bp",       val=self.xyz0[1,:]-np.array([0.,0.,self.options['z_legroot']]), desc="Final x,y,z of end B, after pretension and extra deformation,  relative to leg root", units="m")
+        self.add_output("Bp",       val=self.xyz0[1,:], desc="Final x,y,z of end B, after pretension and extra deformation,  absolute", units="m")
+        self.add_output("Bprel",    val=self.xyz0[1,:]-np.array([0.,0.,self.options['z_legroot']]), desc="Final x,y,z of end B, after pretension and extra deformation,  relative to leg root", units="m")
         self.add_output("sig",      val=0., desc="Actual maximum axial stress"  , units="Pa"     )
         self.add_output("mass",     val=0., desc="Dry mass"  , units="kg"     )
 
@@ -294,7 +296,8 @@ class legCable(om.ExplicitComponent) :
         outputs["Nxyz"]  = -mycable.strain_tension[1] #note "-" because it is at end B
         outputs['mass']  = mycable.mass
         outputs['sig']   = mycable.sig
-        outputs['Bp']    = mycable.Bp - np.array([0.,0.,self.options["z_legroot"]])
+        outputs['Bp']    = mycable.Bp 
+        outputs['Bprel'] = outputs['Bp'] - np.array([0.,0.,self.options["z_legroot"]])
         #mycable.plot_cable()
        # if self.count4plot==3:
         #    plt.show()
@@ -373,10 +376,10 @@ class LegCableBal(om.ImplicitComponent) :
         self.add_input( "Nxyz_LC1",   val=np.zeros(3), desc="Lower C1 cable components of tension at end B",       units="N"   )
         self.add_input( "Nxyz_LC2",   val=np.zeros(3), desc="Lower C2 cable components of tension at end B",       units="N"   )
 
-        self.add_input( "UC1_Bp",     val=np.array([self.L_uh,-self.D_L/2.,0.]), desc="Upper C1 cable final coordinates of end B relative to leg root",       units="m"   )
-        self.add_input( "UC2_Bp",     val=np.array([self.L_uh,self.D_L/2., 0.]), desc="Upper C2 cable final coordinates of end B relative to leg root",       units="m"   )
-        self.add_input( "LC1_Bp",     val=np.array([self.L_lh,-self.D_L/2.,0.]), desc="Lower C1 cable final coordinates of end B relative to leg root",       units="m"   )
-        self.add_input( "LC2_Bp",     val=np.array([self.L_lh,self.D_L/2., 0.]), desc="Lower C2 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "UC1_Bprel",     val=np.array([self.L_uh,-self.D_L/2.,0.]), desc="Upper C1 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "UC2_Bprel",     val=np.array([self.L_uh,self.D_L/2., 0.]), desc="Upper C2 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "LC1_Bprel",     val=np.array([self.L_lh,-self.D_L/2.,0.]), desc="Lower C1 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "LC2_Bprel",     val=np.array([self.L_lh,self.D_L/2., 0.]), desc="Lower C2 cable final coordinates of end B relative to leg root",       units="m"   )
 
         self.add_output( "uvw_legtip", val=np.zeros(3), desc="u,v, w at leg tip", units="m"   )
         self.add_output( "tht_legtip", val=0., desc="twist at leg tip", units="rad"   )
@@ -406,10 +409,10 @@ class LegCableBal(om.ImplicitComponent) :
         Nxyz_LC1 = inputs['Nxyz_LC1']
         Nxyz_LC2 = inputs['Nxyz_LC2']
 
-        UC1_Bp = inputs["UC1_Bp"]
-        UC2_Bp = inputs["UC2_Bp"]
-        LC1_Bp = inputs["LC1_Bp"]
-        LC2_Bp = inputs["LC2_Bp"]
+        UC1_Bp = inputs["UC1_Bprel"]
+        UC2_Bp = inputs["UC2_Bprel"]
+        LC1_Bp = inputs["LC1_Bprel"]
+        LC2_Bp = inputs["LC2_Bprel"]
         
         L_L = L_Lxyz0+uvw_legtip #final leg vector AB
         #>>>>>>>System of equations<<<<< unknowns (outputs) uvw_legtip theta_legtip
@@ -566,10 +569,10 @@ class CableGroup(om.Group):
         cycle.connect("UC2.Nxyz", "LegCableBal.Nxyz_UC2")
         cycle.connect("LC1.Nxyz", "LegCableBal.Nxyz_LC1")
         cycle.connect("LC2.Nxyz", "LegCableBal.Nxyz_LC2")
-        cycle.connect("UC1.Bp",   "LegCableBal.UC1_Bp")
-        cycle.connect("UC2.Bp",   "LegCableBal.UC2_Bp")
-        cycle.connect("LC1.Bp",   "LegCableBal.LC1_Bp")
-        cycle.connect("LC2.Bp",   "LegCableBal.LC2_Bp")
+        cycle.connect("UC1.Bprel","LegCableBal.UC1_Bprel")
+        cycle.connect("UC2.Bprel","LegCableBal.UC2_Bprel")
+        cycle.connect("LC1.Bprel","LegCableBal.LC1_Bprel")
+        cycle.connect("LC2.Bprel","LegCableBal.LC2_Bprel")
 
         cycle.nonlinear_solver = om.NonlinearBlockGS()
         #_____________end cycle group
@@ -701,15 +704,8 @@ def main(**kwargs):
     prob.run_model()
     
     #Print some outputs
-    print('UC.D= {:5.3f} m;  LC.D= {:5.3f} m; UC.sig0= {:5.3f} MPa; LC.sig0 {:5.3f} MPa \n'.\
-                format(*prob.get_val('UC1.D'),  *prob.get_val('LC1.D'), 
-                       *prob.get_val('UC1.sig0')/1.e6, *prob.get_val('LC1.sig0')/1.e6))
-    print(('UC1.Nxyz= '+3*'{:5.3f} ' +'kN; LC1.Nxyz= '+3*'{:5.3f} ' +'kN;\
-          UC1.sig= {:5.3f} MPa; LC1.sig {:5.3f} MPa \n').\
-                format(*prob.get_val('UC1.Nxyz')/1.e3,*prob.get_val('LC1.Nxyz')/1.e3,  *prob.get_val('LC1.D')/1.e3, 
-                       *prob.get_val('UC1.sig')/1.e6, *prob.get_val('LC1.sig')/1.e6))
-    
-    print('Total cable mass= {:.3f} kg \n'.format(*prob.get_val('UC1LC1_mass.mass')))
+    print_results(prob,post_opt=False, bline_yaml=None)
+    plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]))
 
     if opti:
         prob.set_solver_print(level=0)
@@ -733,22 +729,88 @@ def main(**kwargs):
         constraints = case.get_constraints()
     
         #PRINT RESULTS
-        #prob.model.UC1.plot(title='Post-Optimization')
-        #prob.model.LC1.plot(title='Post-Optimization')
-        #print('design vars\t',design_vars['Ddh'],design_vars['Dpod']) 
-        #print('constraints\t',constraints['floater.PRP_Roffsets'])
+        
+        print('constraints\t',constraints['uvw_legtip'])
        # print('constraints\t',constraints['floaterAtRest.PRP_Roffsets'])
         prob.model.list_inputs(print_arrays=True,units=True)
         prob.model.list_outputs(print_arrays=True,units=True)
         prob.list_problem_vars(print_arrays=True)
-        #Spit out a new yaml with the design?
-        #Spit out the Floater Mass Matrix and Hydrostatic (pure hydro) stiffness matrix
+
         print('______________________________________________________\n')
         print('Optimized cable mass ={:5.3f} kg'.format(*objectives['UC1LC1_mass.mass']))
         print('D_c=',design_vars['D_Cs.D_C'])
         print('sig0_c=',design_vars['sig0_Cs.sig0_C'])
-
+        print_results(prob,post_opt=True, bline_yaml=None)
+        #Final cable configuration
+        LC1_xyz = np.copy(parameters['LC1_xyz0'])
+        LC1_xyz[1,:] = prob.get_val('LC1.Bp')
+        LC2_xyz = np.copy(LC1_xyz[1,:]*[1.,-1.,1.])
+        LC2_xyz[1,:] = prob.get_val('LC2.Bp')
+        UC1_xyz = np.copy(parameters['UC1_xyz0'])
+        UC1_xyz[1,:] = prob.get_val('UC1.Bp')
+        UC2_xyz = np.copy(np.copy(UC1_xyz[1,:]*[1.,-1.,1.]))
+        UC2_xyz[1,:] = prob.get_val('UC2.Bp')
+        
+        plot_legcable(LC1_xyz,LC2_xyz,UC1_xyz,UC2_xyz)
         pass
+
+def print_results(prob,*args,post_opt=True, bline_yaml=None):
+    """Print all results by not adding any args or specify a number of strings as in vars_preambles below to print those only.\n
+    If bline_yaml is given as a full path to a file, a new yaml will be spat out as bline_yaml+"mod" """
+    
+    title = '               OPTIMIZATION RESULTS'
+    if not(post_opt):
+        title = '          PRE OPTIMIZATION RESULTS'
+    
+    print('_______________________________________________________')
+    print(title)
+    print('_______________________________________________________')
+
+    print('D_LC= {:5.3f} m;  D_UC= {:5.3f} m  \n'.\
+                format(prob.get_val('D_Cs.D_C')[0],  prob.get_val('D_Cs.D_C')[1]))
+
+    print('sig0_LC= {:5.3f} MPa; sig0_LC= {:5.3f} MPa \n'.\
+                format(prob.get_val('sig0_Cs.sig0_C')[0]/1.e6, prob.get_val('sig0_Cs.sig0_C')[1]/1.e6))
+    
+    print(('LC1.Nxyz= '+3*'{:5.3f} ' +'kN; LC2.Nxyz= '+3*'{:5.3f} ' +'kN \n').\
+                format(*prob.get_val('LC1.Nxyz')/1.e3,*prob.get_val('UC1.Nxyz')/1.e3))
+
+    print(('LC2.Nxyz= '+3*'{:5.3f} ' +'kN; UC2.Nxyz= '+3*'{:5.3f} ' +'kN\n').\
+                format(*prob.get_val('LC2.Nxyz')/1.e3,*prob.get_val('UC2.Nxyz')/1.e3))
+
+    print('Total cable mass (1 UC + 1 LC)= {:.3f} kg \n'.format(*prob.get_val('UC1LC1_mass.mass')))
+
+    print(('Leg tip deflections x,y,z =  '+3*'{:5.3f} ' +'m \n').format(*prob.get_val('uvw_legtip')))
+    print(('Leg tip twist             =  {:5.3f} deg \n').format(np.rad2deg(*prob.get_val('tht_legtip'))))
+    
+    print(('Leg root reactions x,y,z =  '+3*'{:5.3f} ' +'kN \n').format(*prob.get_val('LegCableBal.XYZ0')/1.e3))
+
+    print('_______________________________________________________')
+    print('_______________________________________________________')
+    
+
+    #Dump a yaml file after optimization
+    if bline_yaml != None:
+        thisdatetime = str(datetime.datetime.now())
+        print('New yaml design processed by {:s} on {:s}\n'.format(os.path.basename(__file__), thisdatetime))
+        new_yaml_file = Path(bline_yaml)
+
+        des = prob.model
+        if post_opt:
+            des['comments'] += ' *** Post-Optimization *** '
+            new_yaml_file = Path(new_yaml_file.parents[0],new_yaml_file.stem+"_optimized.yaml")
+        else:
+            new_yaml_file = Path(new_yaml_file.parents[0],new_yaml_file.stem+"_modified.yaml")    
+        des['comments'] += '=> New yaml design processed by {:s} on {:s}\n'.format(os.path.basename(__file__), thisdatetime)
+#        yaml = ryaml.YAML()
+#        yaml.default_flow_style = None
+#        yaml.width = float("inf")
+#        yaml.indent(mapping=4, sequence=6, offset=3)
+#        yaml.allow_unicode = False
+       #TO DO figure out how to dump it nicely, because for now it does not work
+        with open(new_yaml_file, "w", encoding="utf-8") as f2:  #, encoding="utf-8")
+           yaml.dump(des, f2)
+
 
 
 if __name__ == '__main__':
