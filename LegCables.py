@@ -188,7 +188,7 @@ class Cable:
         """Additional strain due to displacement of end B, it will add to pretension; and final load components at end B;\n
         OUTPUT:\n
         Delta_eps: float, extra strain due to final displacement [-]\n
-        Nxyz:      float(3), components of the axial load along X,Y,Z [N]\n
+        Nxyz:      float(3), components of the axial load along X,Y,Z at end A [N]\n
         N:         float, axial load magnitude [N]\n
         Lf:        float, final length of the cable [m]. """
 
@@ -253,6 +253,7 @@ class legCable(om.ExplicitComponent) :
     def initialize(self):
         self.options.declare("material")
         self.options.declare("xyz0",  default=np.zeros([2,3]), desc="Cable [end A; end B] coordinates at setup [m]" ) 
+        self.options.declare("z_legroot",  default=0., desc="Leg root elevation [m]" ) 
         #Next 2 are for guesses
         self.options.declare("sig00",  default=50.e6, desc="Cable prestress initial guess [Pa]" ) 
         self.options.declare("D_C00",      default=0.1, desc="Cable D initial guess [Pa]" ) 
@@ -268,10 +269,10 @@ class legCable(om.ExplicitComponent) :
         
         #Calculate initial guesses for Nxyz
         mycable = Cable(self.options['D_C00'], self.xyz0, self.options["sig00"], np.zeros(3), material=self.material)
-        Nxyz_guess = mycable.strain_tension[1]
+        Nxyz_guess =-mycable.strain_tension[1]
         
         self.add_output("Nxyz",     val=Nxyz_guess,   desc="Final load components along x,y,z at end B, after pretension and extra deformation", units="N")
-        self.add_output("Bp",       val=self.xyz0[1,:], desc="Final x,y,z of end B, after pretension and extra deformation", units="m")
+        self.add_output("Bp",       val=self.xyz0[1,:]-np.array([0.,0.,self.options['z_legroot']]), desc="Final x,y,z of end B, after pretension and extra deformation,  relative to leg root", units="m")
         self.add_output("sig",      val=0., desc="Actual maximum axial stress"  , units="Pa"     )
         self.add_output("mass",     val=0., desc="Dry mass"  , units="kg"     )
         
@@ -283,10 +284,10 @@ class legCable(om.ExplicitComponent) :
 
        # self.count4plot +=1
 
-        outputs["Nxyz"]  = mycable.strain_tension[1]
+        outputs["Nxyz"]  = -mycable.strain_tension[1] #note "-" because it is at end B
         outputs['mass']  = mycable.mass
         outputs['sig']   = mycable.sig
-        outputs['Bp']    = mycable.Bp
+        outputs['Bp']    = mycable.Bp - np.array([0.,0.,self.options["z_legroot"]])
         #mycable.plot_cable()
        # if self.count4plot==3:
         #    plt.show()
@@ -361,10 +362,10 @@ class LegCableBal(om.ImplicitComponent) :
         self.add_input( "Nxyz_LC1",   val=np.zeros(3), desc="Lower C1 cable components of tension at end B",       units="N"   )
         self.add_input( "Nxyz_LC2",   val=np.zeros(3), desc="Lower C2 cable components of tension at end B",       units="N"   )
 
-        self.add_input( "UC1_Bp",     val=np.array([self.L_uh,-self.D_L/2.,self.L_Lxyz0[2]]), desc="Upper C1 cable final coordinates of end B",       units="m"   )
-        self.add_input( "UC2_Bp",     val=np.array([self.L_uh,self.D_L/2., self.L_Lxyz0[2]]), desc="Upper C2 cable final coordinates of end B",       units="m"   )
-        self.add_input( "LC1_Bp",     val=np.array([self.L_lh,-self.D_L/2.,self.L_Lxyz0[2]]), desc="Lower C1 cable final coordinates of end B",       units="m"   )
-        self.add_input( "LC2_Bp",     val=np.array([self.L_lh,self.D_L/2., self.L_Lxyz0[2]]), desc="Lower C2 cable final coordinates of end B",       units="m"   )
+        self.add_input( "UC1_Bp",     val=np.array([self.L_uh,-self.D_L/2.,0.]), desc="Upper C1 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "UC2_Bp",     val=np.array([self.L_uh,self.D_L/2., 0.]), desc="Upper C2 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "LC1_Bp",     val=np.array([self.L_lh,-self.D_L/2.,0.]), desc="Lower C1 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "LC2_Bp",     val=np.array([self.L_lh,self.D_L/2., 0.]), desc="Lower C2 cable final coordinates of end B relative to leg root",       units="m"   )
 
         self.add_output( "uvw_legtip", val=np.zeros(3), desc="u,v, w at leg tip", units="m"   )
         self.add_output( "tht_legtip", val=0., desc="twist at leg tip", units="rad"   )
@@ -416,13 +417,13 @@ class LegCableBal(om.ImplicitComponent) :
                                                     + LC1_Bp[1]*Nxyz_LC1[2] - LC1_Bp[2]*Nxyz_LC1[1]  \
                                                     + LC2_Bp[1]*Nxyz_LC2[2] - LC2_Bp[2]*Nxyz_LC2[1]   #Eq.#5
 # 
-        residuals['uvw_legtip'][1] = Mxyz[1] + L_L[1]*Fxyz[0] + (-Fxyz[2] + M_L * gravity/2.) * L_L[0]          + \
-                                                      + UC1_Bp[0]*Nxyz_UC1[2] - UC1_Bp[2]*Nxyz_UC1[0]  \
-                                                      + UC2_Bp[0]*Nxyz_UC2[2] - UC2_Bp[2]*Nxyz_UC2[0]  \
-                                                      + LC1_Bp[0]*Nxyz_LC1[2] - LC1_Bp[2]*Nxyz_LC1[0]  \
-                                                      + LC2_Bp[0]*Nxyz_LC2[2] - LC2_Bp[2]*Nxyz_LC2[0]  #Eq.#6
+        residuals['uvw_legtip'][2] = Mxyz[1] + L_L[2]*Fxyz[0] + (-Fxyz[2] + M_L * gravity/2.) * L_L[0]          + \
+                                                      - UC1_Bp[0]*Nxyz_UC1[2] + UC1_Bp[2]*Nxyz_UC1[0]  \
+                                                      - UC2_Bp[0]*Nxyz_UC2[2] + UC2_Bp[2]*Nxyz_UC2[0]  \
+                                                      - LC1_Bp[0]*Nxyz_LC1[2] + LC1_Bp[2]*Nxyz_LC1[0]  \
+                                                      - LC2_Bp[0]*Nxyz_LC2[2] + LC2_Bp[2]*Nxyz_LC2[0]  #Eq.#6
 # 
-        residuals['uvw_legtip'][2] = Mxyz[2] + L_L[0]*Fxyz[1] - L_L[1]*Fxyz[0]                                  + \
+        residuals['uvw_legtip'][1] = Mxyz[2] + L_L[0]*Fxyz[1] - L_L[1]*Fxyz[0]                                  + \
                                                       - UC1_Bp[1]*Nxyz_UC1[0] + UC1_Bp[0]*Nxyz_UC1[1]  \
                                                       - UC2_Bp[1]*Nxyz_UC2[0] + UC2_Bp[0]*Nxyz_UC2[1]  \
                                                       - LC1_Bp[1]*Nxyz_LC1[0] + LC1_Bp[0]*Nxyz_LC1[1]  \
@@ -533,15 +534,15 @@ class CableGroup(om.Group):
         cycle.add_subsystem("uvwUC1", uvwProcessor(C1orC2=-1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"] )
         cycle.add_subsystem("uvwUC2", uvwProcessor(C1orC2=+1,D_L=parameters["D_L"],L_L0=parameters["L_L0"],Lh=Lh),promotes_inputs=["uvw_legtip","tht_legtip"])
 
-        cycle.add_subsystem("UC1", legCable(xyz0=parameters['UC1_xyz0'],material=parameters["UCmat"],sig00=parameters["sig00"][1],D_C00=parameters["D_C00"][1]))
-        cycle.add_subsystem("LC1", legCable(xyz0=parameters['LC1_xyz0'],material=parameters["LCmat"],sig00=parameters["sig00"][0],D_C00=parameters["D_C00"][0]))
+        cycle.add_subsystem("UC1", legCable(xyz0=parameters['UC1_xyz0'],material=parameters["UCmat"],sig00=parameters["sig00"][1],D_C00=parameters["D_C00"][1],z_legroot=parameters['z_legroot']))
+        cycle.add_subsystem("LC1", legCable(xyz0=parameters['LC1_xyz0'],material=parameters["LCmat"],sig00=parameters["sig00"][0],D_C00=parameters["D_C00"][0],z_legroot=parameters['z_legroot']))
         #Symmetric cables provide symmetric geometry in mirrored y
         junk = np.copy(parameters["UC1_xyz0"])
         junk[:,1] *=-1
-        cycle.add_subsystem("UC2", legCable(xyz0=junk,material=parameters["UCmat"],sig00=parameters["sig00"][1],D_C00=parameters["D_C00"][1]))
+        cycle.add_subsystem("UC2", legCable(xyz0=junk,material=parameters["UCmat"],sig00=parameters["sig00"][1],D_C00=parameters["D_C00"][1],z_legroot=parameters['z_legroot']))
         junk = np.copy(parameters["LC1_xyz0"])
         junk[:,1] *=-1
-        cycle.add_subsystem("LC2", legCable(xyz0=junk,material=parameters["LCmat"],sig00=parameters["sig00"][0],D_C00=parameters["D_C00"][0]))
+        cycle.add_subsystem("LC2", legCable(xyz0=junk,material=parameters["LCmat"],sig00=parameters["sig00"][0],D_C00=parameters["D_C00"][0],z_legroot=parameters['z_legroot']))
         
         cycle.add_subsystem('LegCableBal',LegCableBal(parameters=parameters),promotes_outputs=["uvw_legtip","tht_legtip"]) 
         cycle.connect("uvwUC1.uvwB","UC1.uvwB")
@@ -612,6 +613,7 @@ def main(**kwargs):
 
     parameters['D_L']      = kwargs['D_L']
     parameters['L_L0']     = kwargs['L_L0']
+    parameters['z_legroot']= kwargs['z_legroot']
     parameters['L_Lxyz0']  = kwargs['L_Lxyz0']
     parameters['M_L']      = kwargs['M_L']
     parameters['zoff']     = kwargs['zoff']
@@ -755,14 +757,14 @@ if __name__ == '__main__':
     #lower cable C1 end A and end B coordinates : see also USFLOWT_geometry.xlsx
     Rstem = 5; #[m] stem's OR 
     Rleg = 1.5; #[m] leg OR
-    zleg = -17 #[m] leg axis elevation
+    z_legroot_def = -17 #[m] leg root elevation
     zkeel= -24 #[m] keel elevation
     zifc=  -10. #[m] stem's ifc elevation  #Testing symmetric config
     cosa = np.cos(np.deg2rad(60.))
     sina = np.sin(np.deg2rad(60.))
     L_lh = L_L0_def - zoff_def[0] #length along leg-axis from stem to lower cable hinge
     LC1_xyz0_def = np.array([[Rstem*(cosa-1.), -Rstem*sina, zkeel  ],
-                             [L_lh, -Rleg, zleg        ]])
+                             [L_lh, -Rleg, L_Lxyz0_def[2]+z_legroot_def        ]])
     UC1_xyz0_def = np.copy(LC1_xyz0_def)
     UC1_xyz0_def[0,2] = zifc
     
@@ -794,6 +796,7 @@ if __name__ == '__main__':
     parser.add_argument('--D_L',       metavar='D_L',      type=float,    help= 'Leg OD [m]',      default=D_L_def)
     parser.add_argument('--L_L0',      metavar='L_L0',     type=float,    help= 'Leg length [m]',      default=L_L0_def)
     parser.add_argument('--L_Lxyz0',   metavar='L_Lxyz0',  type=float,    help= 'Leg vector components float(3) [m]',      default=L_Lxyz0_def)
+    parser.add_argument('--z_legroot', metavar='z_legroot',type=float,    help= 'Leg root elevation [m]',      default=z_legroot_def)
     parser.add_argument('--M_L',       metavar='M_L',      type=float,    help= 'Leg mass [kg]',       default=M_L_def)
     parser.add_argument('--zoff',      metavar='zoff',     type=float,    help= 'Lower and upper cable hinge on leg offset from tip [2] [m]',      default=zoff_def)
     parser.add_argument('--LC1_xyz0',  metavar='LC1_xyz0', type=float,    help= 'Lower C1 cable end A and end B coordinates [2,3] [m]',      default=LC1_xyz0_def)
@@ -804,6 +807,6 @@ if __name__ == '__main__':
     parser.add_argument('--opti',      metavar='opti',     type=bool,     help= 'Whether or not to optimize',      default=opti)
     
     args=parser.parse_args()
-    main(bline_yaml=args.bline_yaml, D_c=args.D_c, sig0_c=args.sig0_c, abc=args.abc, L_L0=args.L_L0,  L_Lxyz0=args.L_Lxyz0, D_L=args.D_L, M_L=args.M_L,zoff=args.zoff, Fxyz_tip=args.Fxyz_tip, \
+    main(bline_yaml=args.bline_yaml, D_c=args.D_c, sig0_c=args.sig0_c, abc=args.abc, L_L0=args.L_L0,  L_Lxyz0=args.L_Lxyz0,z_legroot=args.z_legroot, D_L=args.D_L, M_L=args.M_L,zoff=args.zoff, Fxyz_tip=args.Fxyz_tip, \
          LC1_xyz0=args.LC1_xyz0, UC1_xyz0=args.UC1_xyz0, PSF_mat=args.PSF_mat, D_bounds=args.D_bounds, sig0_bounds=args.sig0_bounds, LCmat=args.LCmat, UCmat=args.UCmat,  opti=args.opti)
 
