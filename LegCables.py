@@ -275,7 +275,10 @@ class legCable(om.ExplicitComponent) :
         self.add_output("Bp",       val=self.xyz0[1,:]-np.array([0.,0.,self.options['z_legroot']]), desc="Final x,y,z of end B, after pretension and extra deformation,  relative to leg root", units="m")
         self.add_output("sig",      val=0., desc="Actual maximum axial stress"  , units="Pa"     )
         self.add_output("mass",     val=0., desc="Dry mass"  , units="kg"     )
-        
+
+    def setup_partials(self):
+        self.declare_partials('*', '*', method='fd')
+
     def compute(self,inputs, outputs,discrete_inputs=None, discrete_outputs=None):        
         """Find the axial load, the strain"""
         mycable = Cable(inputs['D'], self.xyz0, inputs["sig0"], inputs["uvwB"], material=self.material)
@@ -312,6 +315,10 @@ class uvwProcessor(om.ExplicitComponent) :
         self.add_input("tht_legtip",   val=0., desc="Leg tip final rotation about its axis (twist)" , units="rad"     )
         
         self.add_output("uvwB",          val=np.zeros(3), desc="Cable end B final displacement" , units="m"     )
+
+    def setup_partials(self):
+        self.declare_partials('uvwB', 'uvw_legtip', method='fd')
+        self.declare_partials('uvwB', 'tht_legtip', method='fd')
 
     def compute(self,inputs, outputs, discrete_inputs=None,discrete_outputs=None):        
         """Find the displacement of end B of the cable"""
@@ -435,9 +442,9 @@ class LegCableBal(om.ImplicitComponent) :
 
     def guess_nonlinear(self, inputs, outputs, residuals):
         #Now set the initial guesses
-        outputs['uvw_legtip']= [-1.8542e-003, 0.,0.36018] #[-np.cos(2/180.*np.pi),0.0,np.sin(2/180.*np.pi)] 
+        outputs['uvw_legtip']= [-2.3011e-003, 0.,0.41364] #[-np.cos(2/180.*np.pi),0.0,np.sin(2/180.*np.pi)] 
         outputs['tht_legtip']= 0.0
-        outputs['XYZ0']=  np.array([1.6249e+007,0,-2.4994e+006]) #self.M_L*gravity/2.])
+        outputs['XYZ0']=  np.array([1.7273e+007,0,-2.2655e+006]) #self.M_L*gravity/2.])
 
 
 
