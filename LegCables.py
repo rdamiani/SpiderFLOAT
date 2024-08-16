@@ -380,6 +380,9 @@ class LegCableBal(om.ImplicitComponent) :
         self.add_input( "UC2_Bprel",     val=np.array([self.L_uh,self.D_L/2., 0.]), desc="Upper C2 cable final coordinates of end B relative to leg root",       units="m"   )
         self.add_input( "LC1_Bprel",     val=np.array([self.L_lh,-self.D_L/2.,0.]), desc="Lower C1 cable final coordinates of end B relative to leg root",       units="m"   )
         self.add_input( "LC2_Bprel",     val=np.array([self.L_lh,self.D_L/2., 0.]), desc="Lower C2 cable final coordinates of end B relative to leg root",       units="m"   )
+        self.add_input( "uvw_legtip_guess", val=np.zeros(3), desc="guess u,v, w at leg tip", units="m"   )
+        self.add_input( "tht_legtip_guess", val=0., desc="guess theta  at leg tip", units="rad"   )
+        self.add_input( "XYZ0_guess",       val=np.zeros(3), desc="guess XYZ0", units="N"   )
 
         self.add_output( "uvw_legtip", val=np.zeros(3), desc="u,v, w at leg tip", units="m"   )
         self.add_output( "tht_legtip", val=0., desc="twist at leg tip", units="rad"   )
@@ -449,9 +452,18 @@ class LegCableBal(om.ImplicitComponent) :
 
     def guess_nonlinear(self, inputs, outputs, residuals):
         #Now set the initial guesses
-        outputs['uvw_legtip']= [-2.3011e-003, 0.,0.41364] #[-np.cos(2/180.*np.pi),0.0,np.sin(2/180.*np.pi)] 
-        outputs['tht_legtip']= 0.0
-        outputs['XYZ0']=  np.array([1.7273e+007,0,-2.2655e+006]) #self.M_L*gravity/2.])
+        if any(inputs['uvw_legtip_guess']):
+            outputs['uvw_legtip']= inputs['uvw_legtip_guess']
+        else:   
+            outputs['uvw_legtip']= [-2.3011e-003, 0.,0.41364] #[-np.cos(2/180.*np.pi),0.0,np.sin(2/180.*np.pi)] 
+        if any(inputs['tht_legtip_guess']):
+            outputs['tht_legtip']= inputs['tht_legtip_guess']
+        else:   
+            outputs['tht_legtip']= 0.0
+        if any(inputs['XYZ0_guess']):
+            outputs['XYZ0']= inputs['XYZ0_guess']
+        else:   
+            outputs['XYZ0']=  np.array([1.7273e+007,0,-2.2655e+006]) #self.M_L*gravity/2.])
 
 
 
@@ -486,20 +498,37 @@ def _nvec (tx,ty,tz,theta):
         ny *=-1
     return nx,ny,nz
 
-def plot_legcable(cables_xyz,cables_D=None,leg=False):        
+def plot_legcable(cables_xyz,*args, D_cables=None,leg=False,ax=None):        
     """Plot leg and cables assembly.\n
     INPUT:\n
         cables_xyz: float(ncables,2,3), end A and end B coordinates in global CS.\n
-        cables_D: float(ncables), cable diameters.\n
-        leg: bool, whether or not the data is for the leg """
-    fig= plt.figure()
-    ax = plt.axes(projection='3d')
+        D_cables: float(ncables), cable diameters.\n
+        leg: bool, whether or not the data is for the leg\n
+        args: if provided, then final deflected configuration provided
+        ax: axes, if provided it will be reused and final deflection assumed\n"""
+    
+    configs=1
+    linetype0='solid'
+    if len(args):
+        cables_xyz2= args
+        configs +=1
+        linetype0='dotted'
+
+    fig0= plt.figure()
+    ax0 = plt.axes(projection='3d')
+        
     n_cables= cables_xyz.shape[0]
-    if cables_D==None:
-        cables_D=[np.nan]*n_cables
-    for icable,xyz in enumerate(cables_xyz):
-        Lg0=np.linalg.norm(xyz[1,:]-xyz[0,:])
-        ax.plot(xyz[:,0],xyz[:,1],xyz[:,2],label='D={:5.3f} m L= {:5.2f} m'.format(cables_D[icable],Lg0))
+    if len(D_cables)==0:
+        D_cables=[np.nan]*n_cables
+    for iconfig in range(configs):    
+        mycables_xyz = cables_xyz
+        linetype=linetype0
+        if iconfig:
+            mycables_xyz = args[0]
+            linetype='solid'
+        for icable,xyz in enumerate(mycables_xyz):
+            Lg0=np.linalg.norm(xyz[1,:]-xyz[0,:])
+            ax0.plot(xyz[:,0],xyz[:,1],xyz[:,2],label='D={:5.3f} m L= {:5.2f} m'.format(D_cables[icable],Lg0), linestyle=linetype)
 
         #lower_points = self.xyz[0,:]
                         
@@ -511,19 +540,20 @@ def plot_legcable(cables_xyz,cables_D=None,leg=False):
 
         #plt.fill(lower_points,upper_points, color=plt.cm.Dark2(loc_matidx[it]), label=cable)
         
-    ax.axis('equal')
-    ax.grid()
-        #plt.title('Cable Geometry:  D={:5.3f} m L= {:5.2f} m '.format(*self.D,self.Lg0))
-        #plt.plot(upper_points[0,:],upper_points[1,:],color='black',linestyle=':')
-        #plt.legend(myhandles, mylabels)    
-    ax.set_xlabel('x_R[m]')
-    ax.set_ylabel('y_R[m]')
-    ax.set_zlabel('z_R[m]')
-    ax.legend()
+        ax0.axis('equal')
+        ax0.grid()
+            #plt.title('Cable Geometry:  D={:5.3f} m L= {:5.2f} m '.format(*self.D,self.Lg0))
+            #plt.plot(upper_points[0,:],upper_points[1,:],color='black',linestyle=':')
+            #plt.legend(myhandles, mylabels)    
+        ax0.set_xlabel('x_R[m]')
+        ax0.set_ylabel('y_R[m]')
+        ax0.set_zlabel('z_R[m]')
+        ax0.legend()
         #plt.annotate('$\mu_s$({:3.2},{:3.2})= {:5.3e}'.format(*crit_points[ii,:], eps_z[var][ii]*10**6), xy=np.flip(crit_points[ii,:]), xycoords='data',\
         #                       xytext=(0, 10*(ii+1)*(-1)**i_surf), textcoords='offset points', arrowprops=dict(arrowstyle="->", connectionstyle="arc3"),  horizontalalignment='center', verticalalignment='bottom')
             
     plt.show()      
+    return ax0
 
 class CableGroup(om.Group):
     """ Group containing the components to passs the loads, get blade xsec properties and find strains"""
@@ -577,8 +607,8 @@ class CableGroup(om.Group):
         cycle.nonlinear_solver = om.NonlinearBlockGS()
         #_____________end cycle group
         
-        self.add_subsystem("UC1LC1_mass", ExecComp("mass=m_UC + m_LC", m_UC={'val':1000.,'units':"kg"},m_LC={'val':1000.,'units':"kg"}) )#lower and upper cable ODs
-        self.add_subsystem("cable_totD", ExecComp("totD=D_UC + D_LC",D_UC={'val':0.2,'units':"m"},D_LC={'val':0.2,'units':"m"}) )#lower and upper cable ODs        
+        self.add_subsystem("UC1LC1_mass", ExecComp("mass=m_UC + m_LC", mass={'units':"kg"}, m_UC={'val':1000.,'units':"kg"},m_LC={'val':1000.,'units':"kg"}) )#lower and upper cable ODs
+        self.add_subsystem("cable_totD", ExecComp("totD=D_UC + D_LC", totD={'units':"m"},D_UC={'val':0.2,'units':"m"},D_LC={'val':0.2,'units':"m"}) )#lower and upper cable ODs        
         
         #Note: because promote=["*"] then no need for "wt_init." before "blade" or "airfoils" etc.)
 
@@ -595,6 +625,8 @@ class CableGroup(om.Group):
         cycle.nonlinear_solver = om.NewtonSolver(solve_subsystems=False)
         cycle.nonlinear_solver.options['iprint'] = 3
         cycle.nonlinear_solver.options['maxiter'] = 20# 20
+        cycle.nonlinear_solver.options['debug_print'] = True# debug
+        cycle.nonlinear_solver.options['err_on_non_converge'] = False# debug
         cycle.linear_solver = om.DirectSolver()
         
         
@@ -668,21 +700,23 @@ def main(**kwargs):
             
         #DESIGN VARS
 
-        prob.model.add_design_var("D_Cs.D_C",     lower=D_bounds[0,0], upper=D_bounds[0,1])   #indices=0,
+        prob.model.add_design_var("D_Cs.D_C",     lower=D_bounds[0,0], upper=D_bounds[0,1], ref= 0.2)   #indices=0,
         #prob.model.add_design_var("LC1.D",     lower=D_bounds[1,0], upper=D_bounds[1,1])   #indices=0,
-        prob.model.add_design_var("sig0_Cs.sig0_C",  lower=sig0_bounds[0], upper=sig0_bounds[1]) 
+        prob.model.add_design_var("sig0_Cs.sig0_C",  lower=sig0_bounds[0], upper=sig0_bounds[1], ref=500.e6) 
 
         #OBJECTIVE 
         #prob.model.add_objective("cable_totD.totD", ref =0.5)#,  ref=5000.) #this means reducing structural mass
         prob.model.add_objective("UC1LC1_mass.mass", ref =10000.)#,  ref=5000.) #this means reducing structural mass
         
         #CONSTRAINTS  
-        prob.model.add_constraint('UC1.sig',  upper=parameters['PSF_mat']*parameters['UCmat'].fy) #This is yield constraint
-        prob.model.add_constraint('UC2.sig',  upper=parameters['PSF_mat']*parameters['UCmat'].fy) #This is yield constraint
-        prob.model.add_constraint('LC1.sig',  upper=parameters['PSF_mat']*parameters['LCmat'].fy) #This is yield constraint
-        prob.model.add_constraint('LC2.sig',  upper=parameters['PSF_mat']*parameters['LCmat'].fy) #This is yield constraint
+        prob.model.add_constraint('UC1.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint and no slacke.g., 10 MPa, to avoid slack conditions
+        prob.model.add_constraint('UC2.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint and no slack
+        prob.model.add_constraint('LC1.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint
+        prob.model.add_constraint('LC2.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint
+        
+        
 
-        prob.model.add_constraint('uvw_legtip', indices=range(1,3),  upper=+1.5) #This is pitch constraint
+        prob.model.add_constraint('uvw_legtip', indices=range(1,3),  upper=np.array([1.5,1.5]), ref=1.) #This is max deflection of leg tip in y and z
         
         #RECORDER
         recorder = om.SqliteRecorder('cases.sql') #creates a recorder variable
@@ -705,10 +739,16 @@ def main(**kwargs):
     
     #Print some outputs
     print_results(prob,post_opt=False, bline_yaml=None)
-    plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]))
+
+    ax0=plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]),\
+                  D_cables=np.tile(prob.get_val('D_Cs.D_C'),[2,1]).T.reshape([1,-1]).squeeze())
+    
+    prob.set_val('LegCableBal.uvw_legtip_guess',prob.get_val('uvw_legtip')) #Assign new guesses
+    prob.set_val('LegCableBal.tht_legtip_guess',prob.get_val('tht_legtip')) #Assign new guesses
+    prob.set_val('LegCableBal.XYZ0_guess',prob.get_val('LegCableBal.XYZ0')) #Assign new guesses
 
     if opti:
-        prob.set_solver_print(level=0)
+        prob.set_solver_print(level=1)
         prob.model.approx_totals()
     
         prob.run_driver()
@@ -730,28 +770,31 @@ def main(**kwargs):
     
         #PRINT RESULTS
         
-        print('constraints\t',constraints['uvw_legtip'])
-       # print('constraints\t',constraints['floaterAtRest.PRP_Roffsets'])
-        prob.model.list_inputs(print_arrays=True,units=True)
-        prob.model.list_outputs(print_arrays=True,units=True)
-        prob.list_problem_vars(print_arrays=True)
+        #print('constraints uvw_legtip[1,2] [m] \t',constraints['uvw_legtip'])
+        prob.list_problem_vars(cons_opts=['lower','upper'],desvar_opts=['lower','upper'],print_arrays=True)
+        
+
+        #prob.model.list_inputs(print_arrays=True,units=True)
+        #prob.model.list_outputs(print_arrays=True,units=True)
+        #prob.list_problem_vars(print_arrays=True)
 
         print('______________________________________________________\n')
-        print('Optimized cable mass ={:5.3f} kg'.format(*objectives['UC1LC1_mass.mass']))
-        print('D_c=',design_vars['D_Cs.D_C'])
-        print('sig0_c=',design_vars['sig0_Cs.sig0_C'])
+        print('Optimized cable mass ={:5.3f} kg'.format(*prob.get_val('UC1LC1_mass.mass')))
+        #print('D_c=',design_vars['D_Cs.D_C'])
+        #print('sig0_c=',design_vars['sig0_Cs.sig0_C'])
         print_results(prob,post_opt=True, bline_yaml=None)
         #Final cable configuration
         LC1_xyz = np.copy(parameters['LC1_xyz0'])
         LC1_xyz[1,:] = prob.get_val('LC1.Bp')
-        LC2_xyz = np.copy(LC1_xyz[1,:]*[1.,-1.,1.])
+        LC2_xyz = np.copy(LC1_xyz)*np.array([[1.,-1.,1.],[1.,-1.,1.]])
         LC2_xyz[1,:] = prob.get_val('LC2.Bp')
         UC1_xyz = np.copy(parameters['UC1_xyz0'])
         UC1_xyz[1,:] = prob.get_val('UC1.Bp')
-        UC2_xyz = np.copy(np.copy(UC1_xyz[1,:]*[1.,-1.,1.]))
+        UC2_xyz = np.copy(UC1_xyz)*np.array([[1.,-1.,1.],[1.,-1.,1.]])
         UC2_xyz[1,:] = prob.get_val('UC2.Bp')
         
-        plot_legcable(LC1_xyz,LC2_xyz,UC1_xyz,UC2_xyz)
+        plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]),\
+                      np.array([LC1_xyz,LC2_xyz,UC1_xyz,UC2_xyz]), D_cables=np.tile(design_vars['D_Cs.D_C'],[2,1]).T.reshape([1,-1]).squeeze(),ax=ax0)
         pass
 
 def print_results(prob,*args,post_opt=True, bline_yaml=None):
@@ -769,14 +812,20 @@ def print_results(prob,*args,post_opt=True, bline_yaml=None):
     print('D_LC= {:5.3f} m;  D_UC= {:5.3f} m  \n'.\
                 format(prob.get_val('D_Cs.D_C')[0],  prob.get_val('D_Cs.D_C')[1]))
 
-    print('sig0_LC= {:5.3f} MPa; sig0_LC= {:5.3f} MPa \n'.\
+    print('sig0_LC= {:5.3f} MPa; sig0_UC= {:5.3f} MPa \n'.\
                 format(prob.get_val('sig0_Cs.sig0_C')[0]/1.e6, prob.get_val('sig0_Cs.sig0_C')[1]/1.e6))
     
-    print(('LC1.Nxyz= '+3*'{:5.3f} ' +'kN; LC2.Nxyz= '+3*'{:5.3f} ' +'kN \n').\
+    print(('LC1.Nxyz= '+3*'{:5.3f} ' +'kN; UC1.Nxyz= '+3*'{:5.3f} ' +'kN \n').\
                 format(*prob.get_val('LC1.Nxyz')/1.e3,*prob.get_val('UC1.Nxyz')/1.e3))
 
     print(('LC2.Nxyz= '+3*'{:5.3f} ' +'kN; UC2.Nxyz= '+3*'{:5.3f} ' +'kN\n').\
                 format(*prob.get_val('LC2.Nxyz')/1.e3,*prob.get_val('UC2.Nxyz')/1.e3))
+
+    print(('LC1.sig= {:5.3f} ' +'MPa; UC1.sig= {:5.3f} ' +'MPa \n').\
+                format(*prob.get_val('LC1.sig')/1.e6,*prob.get_val('UC1.sig')/1.e6))
+
+    print(('LC2.sig= {:5.3f} ' +'MPa; UC2.sig= {:5.3f} ' +'MPa \n').\
+                format(*prob.get_val('LC2.sig')/1.e6,*prob.get_val('UC2.sig')/1.e6))
 
     print('Total cable mass (1 UC + 1 LC)= {:.3f} kg \n'.format(*prob.get_val('UC1LC1_mass.mass')))
 
@@ -823,7 +872,7 @@ if __name__ == '__main__':
     D_L_def=3. # [m] leg OD
     L_L0_def=35. # [m] leg length
     L_Lxyz0_def = np.array([L_L0_def,0.,0.]) #components of leg vector root to tip in global CS
-    M_L_def=0*15000. # [kg] leg mass
+    M_L_def=267.e3 # [kg] leg mass
     zoff_def = [3.5,5.5] # [m] distance of lower and upper hinge from leg tip
     abc_def=[7.,29,0.] 
 
@@ -832,20 +881,22 @@ if __name__ == '__main__':
     Rleg = 1.5; #[m] leg OR
     z_legroot_def = -17 #[m] leg root elevation
     zkeel= -24 #[m] keel elevation
-    zifc=  -10. #[m] stem's ifc elevation  #Testing symmetric config
+    zifc=  +12. #[m] stem's ifc elevation  #Testing symmetric config
     cosa = np.cos(np.deg2rad(60.))
     sina = np.sin(np.deg2rad(60.))
     L_lh = L_L0_def - zoff_def[0] #length along leg-axis from stem to lower cable hinge
     LC1_xyz0_def = np.array([[Rstem*(cosa-1.), -Rstem*sina, zkeel  ],
                              [L_lh, -Rleg, L_Lxyz0_def[2]+z_legroot_def        ]])
+    L_uh = L_L0_def - zoff_def[1] #length along leg-axis from stem to upper cable hinge
     UC1_xyz0_def = np.copy(LC1_xyz0_def)
     UC1_xyz0_def[0,2] = zifc
+    UC1_xyz0_def[1,0] = L_uh
     
-    D_c_def = [0.15,0.15] #lower,upper cable ODs [m]
-    sig0_c_def = np.array([100.E6, 100.e6]) #lower, upper cable sigma0  constraints[Pa]
-    sig0_bounds_def = np.array([50.E6, 700.e6]) # sigma0  constraints[Pa]
+    D_c_def = [0.2,0.15] #lower,upper cable ODs [m]
+    sig0_c_def = np.array([540.E6, 950.e6]) #lower, upper cable sigma0  constraints[Pa]
+    sig0_bounds_def = np.array([50.E6, 1000.e6]) # sigma0  constraints[Pa]
     
-    D_bounds_def = np.array([[0.05,0.25],[0.05,0.25]]) #lower and upper cable cOD min,max
+    D_bounds_def = np.array([[0.05,0.5],[0.05,0.5]]) #lower and upper cable cOD min,max
     UC_steel_def=Material(matname='cable_steel', fp=1250.e6, E=195.e9, rho=7850.)
     LC_steel_def=Material(matname='cable_steel', fp=1250.e6, E=195.e9, rho=7850.)
 
@@ -853,7 +904,8 @@ if __name__ == '__main__':
 
     opti = True
     #INPUTS END
-
+    print('UC preload ={:} N'.format(sig0_c_def[1]*np.pi/4*D_c_def[1]**2))
+    print('LC preload ={:} N'.format(sig0_c_def[0]*np.pi/4*D_c_def[0]**2))
     #Read inputs
     parser=argparse.ArgumentParser(description='SF_LegCable optimizer')
     
