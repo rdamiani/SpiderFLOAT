@@ -681,7 +681,7 @@ def main(**kwargs):
         SNOPT=False
 
         prob.driver = om.ScipyOptimizeDriver()
-        prob.driver.options['optimizer'] =  'SLSQP'#'COBYLA' #'COBYLA' #'SLSQP' #'COBYLA' #'SLSQP' 
+        prob.driver.options['optimizer'] =  'COBYLA' #'SLSQP'#'COBYLA' #'COBYLA' #'SLSQP' #'COBYLA' #'SLSQP' 
 
         prob.driver.options['maxiter'] = 300 #ScipyOpt
         prob.driver.options['tol'] = 1e-3 #1e-8 ScipyOpt
@@ -700,23 +700,23 @@ def main(**kwargs):
             
         #DESIGN VARS
 
-        prob.model.add_design_var("D_Cs.D_C",     lower=D_bounds[0,0], upper=D_bounds[0,1], ref= 0.2)   #indices=0,
+        prob.model.add_design_var("D_Cs.D_C",     lower=D_bounds[0,0], upper=D_bounds[0,1], ref= 0.5)   #indices=0,
         #prob.model.add_design_var("LC1.D",     lower=D_bounds[1,0], upper=D_bounds[1,1])   #indices=0,
-        prob.model.add_design_var("sig0_Cs.sig0_C",  lower=sig0_bounds[0], upper=sig0_bounds[1], ref=500.e6) 
+        prob.model.add_design_var("sig0_Cs.sig0_C",  lower=sig0_bounds[0], upper=sig0_bounds[1], ref=1000.e6) 
 
         #OBJECTIVE 
         #prob.model.add_objective("cable_totD.totD", ref =0.5)#,  ref=5000.) #this means reducing structural mass
         prob.model.add_objective("UC1LC1_mass.mass", ref =10000.)#,  ref=5000.) #this means reducing structural mass
         
         #CONSTRAINTS  
-        prob.model.add_constraint('UC1.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint and no slacke.g., 10 MPa, to avoid slack conditions
-        prob.model.add_constraint('UC2.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint and no slack
-        prob.model.add_constraint('LC1.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint
-        prob.model.add_constraint('LC2.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=500.e6) #This is yield constraint
+        prob.model.add_constraint('UC1.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint and no slacke.g., 10 MPa, to avoid slack conditions
+        prob.model.add_constraint('UC2.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint and no slack
+        prob.model.add_constraint('LC1.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint
+        prob.model.add_constraint('LC2.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint
         
         
 
-        prob.model.add_constraint('uvw_legtip', indices=range(1,3),  upper=np.array([1.5,1.5]), ref=1.) #This is max deflection of leg tip in y and z
+        prob.model.add_constraint('uvw_legtip', indices=range(1,3),  upper=np.array([1.5,1.5]), ref=1.5) #This is max deflection of leg tip in y and z
         
         #RECORDER
         recorder = om.SqliteRecorder('cases.sql') #creates a recorder variable
@@ -904,8 +904,10 @@ if __name__ == '__main__':
 
     opti = True
     #INPUTS END
-    print('UC preload ={:} N'.format(sig0_c_def[1]*np.pi/4*D_c_def[1]**2))
-    print('LC preload ={:} N'.format(sig0_c_def[0]*np.pi/4*D_c_def[0]**2))
+    print('4ANSYS UC preload ={:} N'.format(sig0_c_def[1]*np.pi/4*D_c_def[1]**2))
+    print('4ANSYS LC preload ={:} N'.format(sig0_c_def[0]*np.pi/4*D_c_def[0]**2))
+    print('4ANSYS LC EA/L ={:} N/m'.format(LC_steel_def.E*np.pi/4*D_c_def[0]**2/np.linalg.norm(LC1_xyz0_def[1,:]-LC1_xyz0_def[0,:])))
+    print('4ANSYS UC EA/L ={:} N/m'.format(UC_steel_def.E*np.pi/4*D_c_def[1]**2/np.linalg.norm(UC1_xyz0_def[1,:]-UC1_xyz0_def[0,:])))
     #Read inputs
     parser=argparse.ArgumentParser(description='SF_LegCable optimizer')
     
