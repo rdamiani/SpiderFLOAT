@@ -465,8 +465,6 @@ class LegCableBal(om.ImplicitComponent) :
         else:   
             outputs['XYZ0']=  np.array([1.7273e+007,0,-2.2655e+006]) #self.M_L*gravity/2.])
 
-
-
     def solve_nonlinear(self, inputs, outputs, residuals):
         pass
         #solution = self.nonlinear_solver(residuals,iprint=3)
@@ -478,7 +476,7 @@ class LegCableBal(om.ImplicitComponent) :
        # Mxyz_tip = inputs["Mxyz_tip"]
        # L_L0 = self.LL0
 
-#NOW THE ACTUAL GROUP (ASSEMBLY) FOR THE PROBLEM   
+#NOW THE ACTUAL SUBGROUP (ASSEMBLY) FOR THE PROBLEM   
 
 class cycle(om.Group):
     """ Group containing the components that form the coupled "cycle" to be solved first before optimizer can do its thing"""
@@ -523,8 +521,9 @@ class cycle(om.Group):
         self.connect("LC2.Bprel","LegCableBal.LC2_Bprel")
         
         #Assign NL and Linear solver
-        self.nonlinear_solver = om.NonlinearBlockGS()
-        self.nonlinear_solver = om.NewtonSolver(solve_subsystems=False)
+        #self.nonlinear_solver = om.NonlinearBlockGS()
+        self.nonlinear_solver = om.NewtonSolver(solve_subsystems=False) #(solve_subsystems=False) #NewtonSolver(solve_subsystems=False)
+        self.nonlinear_solver.options['atol'] = 1.e-5
         self.nonlinear_solver.options['iprint'] = 3
         self.nonlinear_solver.options['maxiter'] = 20# 20
         self.nonlinear_solver.options['debug_print'] = True# debug
@@ -550,7 +549,7 @@ class CableGroup(om.Group):
         self.add_subsystem("sig0_Cs", IndepVarComp("sig0_C",val=np.zeros(2),units="Pa")) #lower and upper cable prestresses
         
         #Next will be used for objective functions
-        self.add_subsystem("UC1LC1_mass", ExecComp("cables_mass = m_UC + m_LC", cables_mass={'val':2000.,'units':"kg"}, m_UC={'val':1000.,'units':"kg"},m_LC={'val':1000.,'units':"kg"}) )#lower and upper cable ODs
+        self.add_subsystem("UC1LC1_mass", ExecComp("cables_mass = m_UC + m_LC", cables_mass={'units':"kg"}, m_UC={'val':1000.,'units':"kg"},m_LC={'val':1000.,'units':"kg"}) )#lower and upper cable ODs
         self.add_subsystem("cable_totD",  ExecComp("totD=D_UC + D_LC", totD={'units':"m"},D_UC={'val':0.2,'units':"m"},D_LC={'val':0.2,'units':"m"}) )#lower and upper cable ODs        
 
         # Parallel Subsystem for load cases.
@@ -576,10 +575,16 @@ class CableGroup(om.Group):
             self.connect("sig0_Cs.sig0_C",[par_sys_name+"LC1.sig0",par_sys_name+"LC2.sig0"], src_indices=0)
         
         self.connect("D_Cs.D_C","cable_totD.D_UC", src_indices=1)
+        self.connect("D_Cs.D_C","cable_totD.D_LC", src_indices=0)
         self.connect("parallel.subcycle_0.UC1.mass","UC1LC1_mass.m_UC")
         self.connect("parallel.subcycle_0.LC1.mass","UC1LC1_mass.m_LC")
 
-        #plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]),)
+        # Converge the outer loop with Gauss Seidel, with a looser tolerance.
+        self.nonlinear_solver = om.NewtonSolver(solve_subsystems=False)
+        self.nonlinear_solver.options['atol'] = 1.e-5
+        self.nonlinear_solver.options['iprint'] = 3
+        self.nonlinear_solver.options['maxiter'] = 20# 20
+        self.linear_solver = om.DirectSolver()
 
     def compute(self,inputs, outputs):
       """compute cable OD and sig0 to satisfy constraints"""
@@ -644,29 +649,31 @@ def main(**kwargs):
     
     prob= om.Problem( model=CableGroup(parameters=parameters)) 
           
-    if opti:
-        #prob.driver = om.ScipyOptimizeDriver()
-        #prob.driver.options['optimizer'] =  #'COBYLA' #'SLSQP'
+    if len(opti):
         SNOPT=False
+        
+        if opti=='pyOpt':
+            prob.driver = om.pyOptSparseDriver() 
 
-        prob.driver = om.ScipyOptimizeDriver()
-        prob.driver.options['optimizer'] =  'COBYLA' #'SLSQP'#'COBYLA' #'COBYLA' #'SLSQP' #'COBYLA' #'SLSQP' 
-
-        prob.driver.options['maxiter'] = 300 #ScipyOpt
-        prob.driver.options['tol'] = 1e-3 #1e-8 ScipyOpt
-
-        if SNOPT:
-            prob.driver =om.pyOptSparseDriver()
-            prob.driver.options['optimizer'] = "SNOPT" #"SLSQP" #"SNOPT" #'SNOPT'
-            # prob.driver.options['maxiter'] = 100
-            #prob.driver.options['tol'] = 1e-3 #1e-8
-            prob.driver.opt_settings={'Major feasibility tolerance': 1e-3,\
-                'Minor feasibility tolerance': 1e-3,\
-                'Major optimality tolerance': 1e-3,\
-                'Function precision': 1e-3}
+            if SNOPT:
+                prob.driver.options['optimizer'] = "SNOPT" #"SLSQP" #"SNOPT" #'SNOPT'
+                # prob.driver.options['maxiter'] = 100
+                #prob.driver.options['tol'] = 1e-3 #1e-8
+                prob.driver.opt_settings={'Major feasibility tolerance': 1e-3,\
+                    'Minor feasibility tolerance': 1e-3,\
+                    'Major optimality tolerance': 1e-3,\
+                    'Function precision': 1e-3}
+            else:
+                prob.driver.opt_settings={'MAXIT': 400,'ACC': 1e-3  }
+         
         else:
-            prob.driver.opt_settings={'MAXIT': 400,'ACC': 1e-3  }
-            
+            prob.driver = om.ScipyOptimizeDriver()
+            prob.driver.options['maxiter'] = 300 #ScipyOpt
+            prob.driver.options['tol'] = 1e-3 #1e-8 ScipyOpt
+
+        #Select optimizer here
+        prob.driver.options['optimizer'] =  'SLSQP' #'COBYLA' #'SLSQP'#'COBYLA' #'SLSQP' #'COBYLA' #'SLSQP'     
+        
         #DESIGN VARS
 
         prob.model.add_design_var("D_Cs.D_C",     lower=D_bounds[0,0], upper=D_bounds[0,1], ref= 0.5)   #indices=0,
@@ -685,7 +692,7 @@ def main(**kwargs):
             prob.model.add_constraint(par_sys_name+'UC2.sig',  lower=10.e6, upper=parameters['UCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint and no slack
             prob.model.add_constraint(par_sys_name+'LC1.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint
             prob.model.add_constraint(par_sys_name+'LC2.sig',  upper=parameters['LCmat'].fp/parameters['PSF_mat'], ref=1000.e6) #This is yield constraint
-            #prob.model.add_constraint(par_sys_name+'uvw_legtip', indices=range(1,3),  upper=np.array([1.5,1.5]), ref=1.5) #This is max deflection of leg tip in y and z
+            prob.model.add_constraint(par_sys_name+'uvw_legtip', indices=range(1,3),  upper=np.array([1.5,1.5]), ref=1.5) #This is max deflection of leg tip in y and z
         
         #RECORDER
         recorder = om.SqliteRecorder('cases.sql') #creates a recorder variable
@@ -694,9 +701,6 @@ def main(**kwargs):
 
     prob.setup()
     
-    # Load initial wind turbine data from wt_initial to the openmdao problem; Order of these two has been swapped, following runBladeOptimizer
-    #wt_opt= yaml2openmdao(wt_opt, modeling_options, wt_init, analysis_options) 
-            
     #Here are the only real inputs for now:
        
     prob.set_val('D_Cs.D_C',D_c)
@@ -708,6 +712,8 @@ def main(**kwargs):
     
     #Print some outputs
     print_results(prob,  n_DLCs=parameters['n_DLCs'], post_opt=False, bline_yaml=None)
+    inputs, outputs, residuals = prob.model.get_nonlinear_vectors()
+    print('residuals of subcycle1=',residuals['parallel.subcycle_1.LegCableBal.uvw_legtip'])
 
     ax0=plot_legcable(np.array([parameters['LC1_xyz0'],parameters['LC1_xyz0']*[1,-1,1],parameters['UC1_xyz0'],parameters['UC1_xyz0']*[1,-1,1]]),\
                   D_cables=np.tile(prob.get_val('D_Cs.D_C'),[2,1]).T.reshape([1,-1]).squeeze())
@@ -718,7 +724,7 @@ def main(**kwargs):
         prob.set_val(par_sys_name+'LegCableBal.tht_legtip_guess',prob.get_val(par_sys_name+'tht_legtip')) #Assign new guesses
         prob.set_val(par_sys_name+'LegCableBal.XYZ0_guess',      prob.get_val(par_sys_name+'LegCableBal.XYZ0')) #Assign new guesses
 
-    if opti:
+    if len(opti):
         prob.set_solver_print(level=1)
         prob.model.approx_totals()
     
@@ -1036,7 +1042,7 @@ if __name__ == '__main__':
 
     PSF_mat_def=1.2  #material yield PSF for cable
 
-    opti = True
+    opti = "SciPi" #"pyOpt" #"SciPi" ,""
     #INPUTS END
     print('4ANSYS UC preload ={:} N'.format(sig0_c_def[1]*np.pi/4*D_c_def[1]**2))
     print('4ANSYS LC preload ={:} N'.format(sig0_c_def[0]*np.pi/4*D_c_def[0]**2))
@@ -1065,7 +1071,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--UCmat',     metavar='UCmat',    type=object,   help= 'Upper cable material [Material object]', default=UC_steel_def) 
     parser.add_argument('--LCmat',     metavar='LCmat',    type=object,   help= 'Lower cable material [Material object]', default=LC_steel_def) 
-    parser.add_argument('--opti',      metavar='opti',     type=bool,     help= 'Whether or not to optimize',      default=opti)
+    parser.add_argument('--opti',      metavar='opti',     type=str,      help= 'If set other than "" (no optimization) then it indicates "pyOpt" or "SciPi" optimizer package',      default=opti)
     
     args=parser.parse_args()
     main(bline_yaml=args.bline_yaml, xls_input=args.xls_input, D_c=args.D_c, sig0_c=args.sig0_c, abc=args.abc, L_L0=args.L_L0,  L_Lxyz0=args.L_Lxyz0,z_legroot=args.z_legroot, D_L=args.D_L, M_L=args.M_L, Fxyz_tip=args.Fxyz_tip, \
